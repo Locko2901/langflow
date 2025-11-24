@@ -335,7 +335,7 @@ def create_tool_coroutine(tool_name: str, arg_schema: type[BaseModel], client) -
 
 
 def create_tool_func(tool_name: str, arg_schema: type[BaseModel], client) -> Callable[..., str]:
-    def tool_func(*args, **kwargs):
+    def tool_func(*args, _asyncio=asyncio, **kwargs):
         field_names = list(arg_schema.model_fields.keys())
         provided_args = {}
         for i, arg in enumerate(args):
@@ -351,8 +351,16 @@ def create_tool_func(tool_name: str, arg_schema: type[BaseModel], client) -> Cal
             _handle_tool_validation_error(e, tool_name, provided_args, arg_schema)
 
         try:
-            loop = asyncio.get_event_loop()
-            return loop.run_until_complete(client.run_tool(tool_name, arguments=validated.model_dump()))
+            # Prefer asyncio.run() if possible — avoids loop confusion
+            return _asyncio.run(
+                client.run_tool(tool_name, arguments=validated.model_dump())
+            )
+        except RuntimeError:
+            # Fallback for cases where an event loop is already running
+            loop = _asyncio.get_event_loop()
+            return loop.run_until_complete(
+                client.run_tool(tool_name, arguments=validated.model_dump())
+            )
         except Exception as e:
             logger.error(f"Tool '{tool_name}' execution failed: {e}")
             # Re-raise with more context
